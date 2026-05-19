@@ -25,7 +25,9 @@ jobs:
 
       # Pull Citadel's composite action straight from the EDR repo.
       - name: Citadel
-        uses: Mahesh-Kete/citadel/action@main
+        # Points at Mahesh-Kete/monorepo (the user's actual working copy),
+        # not Mahesh-Kete/citadel (the older fork without the debugfs fix).
+        uses: Mahesh-Kete/monorepo/action@main
         with:
           mode: audit
           backend-url: http://localhost:8080
