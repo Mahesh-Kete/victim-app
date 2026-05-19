@@ -1,0 +1,78 @@
+name: citadel-demo
+# A varied workload that exercises every probe + most detection rules.
+#
+# Sections:
+#   1. ALLOWED   — github + npm (will be on the policy allowlist)
+#   2. NEW DOMAIN — httpbin / ipinfo (not on the allowlist → "new_domain" detection)
+#   3. FILE WRITES — workspace activity (file probe + tamper diff)
+#   4. PROCESS EXECS — variety so the proc-tree view is interesting
+#   5. ATTACK PATTERN — reverse-shell-shaped TCP connect (port closed, harmless)
+#
+# Trigger manually from the Actions UI ("Run workflow"), or push a commit
+# that touches this file.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/citadel-demo.yml'
+
+jobs:
+  demo:
+    runs-on: [self-hosted, linux, citadel-runner]
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pull Citadel's composite action straight from the EDR repo.
+      - name: Citadel
+        uses: Mahesh-Kete/citadel/action@main
+        with:
+          mode: audit
+          backend-url: http://localhost:8080
+          image-tag: dev
+          watch-path: ${{ github.workspace }}
+
+      # 1) Allowed traffic ────────────────────────────────────────────
+      - name: Allowed — github + npm registry
+        run: |
+          citadel-step "allowed: github api"
+          curl -sS https://api.github.com/zen ; echo
+          citadel-step "allowed: npm search"
+          curl -sS "https://registry.npmjs.org/-/v1/search?text=react&size=1" | head -c 200
+          echo
+          citadel-step "allowed: raw github"
+          curl -sS https://raw.githubusercontent.com/octocat/Hello-World/master/README | head -c 100
+          echo
+
+      # 2) New-domain traffic ────────────────────────────────────────
+      - name: Suspicious — calls to non-allowlisted hosts
+        run: |
+          citadel-step "suspicious: httpbin"
+          curl -sS https://httpbin.org/get | head -c 200 ; echo
+          citadel-step "suspicious: ipinfo"
+          curl -sS https://ipinfo.io/json | head -c 200 ; echo
+
+      # 3) File-write activity ───────────────────────────────────────
+      - name: File writes inside workspace
+        run: |
+          citadel-step "file: workspace writes"
+          echo "hello from victim-app" > ${GITHUB_WORKSPACE}/citadel-demo-note.txt
+          mkdir -p ${GITHUB_WORKSPACE}/.citadel-demo
+          dd if=/dev/urandom of=${GITHUB_WORKSPACE}/.citadel-demo/blob.bin bs=1024 count=8 2>/dev/null
+          ls -la ${GITHUB_WORKSPACE}/.citadel-demo
+
+      # 4) Process variety ───────────────────────────────────────────
+      - name: Process variety
+        run: |
+          citadel-step "proc: variety"
+          uname -a
+          whoami
+          date
+          python3 -c "print('hi from python')"
+          bash -c "echo nested shell"
+
+      # 5) Reverse-shell-shaped TCP attempt (harmless — port closed) ─
+      - name: Reverse-shell pattern (closed port)
+        run: |
+          citadel-step "attack: revshell pattern"
+          timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/14444; echo hello >&3' || true
